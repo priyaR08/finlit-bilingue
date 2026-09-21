@@ -179,7 +179,7 @@
   .waypoint.done{ background:var(--mint); border-color:var(--mint); color:#0A100D; }
   .waypoint.current{ border-color:var(--mint); color:var(--mint); }
 
-  .quiz-card{ background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:26px; }
+    .quiz-card{ background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:26px; box-shadow:0 14px 34px var(--shadow); position:relative; }
   .quiz-q{ font-size:1.05rem; font-weight:700; }
   .quiz-q .es{ font-size:.85rem; font-weight:600; color:var(--ink-soft); margin-top:4px; }
   .quiz-options{ margin-top:18px; display:flex; flex-direction:column; gap:10px; }
@@ -200,13 +200,33 @@
   .avatar-big{ width:96px; height:160px; margin:18px auto; display:block; }
   .back-btn{ display:block; margin:20px auto 0; background:var(--mint); color:#0A100D; border:none; border-radius:999px; padding:11px 22px; font-weight:700; font-size:.88rem; }
 
-  /* ---------- Progressive photo reveal during quiz ---------- */
-  .reveal-piece{ position:fixed; width:50%; height:50%; background-size:200% 200%; background-repeat:no-repeat; opacity:0; transition:opacity .7s ease; pointer-events:none; z-index:0; filter:saturate(.9); }
-  .reveal-piece.shown{ opacity:.8; }
-  #piece-tl{ top:0; left:0; background-position:0% 0%; }
-  #piece-tr{ top:0; left:50%; background-position:100% 0%; }
-  #piece-bl{ top:50%; left:0; background-position:0% 100%; }
-  #piece-br{ top:50%; left:50%; background-position:100% 100%; }
+    /* ---------- Hike photo preview window (bottom-right, expands full-screen on trail completion) ---------- */
+  .hike-preview{
+    position:fixed; right:20px; bottom:20px; width:120px; height:120px;
+    border-radius:14px; overflow:hidden; z-index:50;
+    border:2px solid var(--border-strong); box-shadow:0 8px 24px var(--shadow);
+    background-color:var(--surface-2); background-size:cover; background-position:center;
+    opacity:0; transform:scale(.85); pointer-events:none;
+    transition:opacity .4s ease, transform .4s ease;
+  }
+  .hike-preview.show{ opacity:1; transform:scale(1); }
+  .hike-preview .hp-label{
+    position:absolute; left:0; right:0; bottom:0; padding:5px 6px 4px;
+    font-size:.56rem; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+    color:var(--ink); background:linear-gradient(to top, rgba(0,0,0,.8), transparent);
+    text-align:center;
+  }
+  .hp-quadrant{ position:absolute; width:50%; height:50%; background:var(--surface-2); transition:opacity .5s ease; opacity:1; }
+  .hp-quadrant.revealed{ opacity:0; }
+  #hp-tl{ top:0; left:0; } #hp-tr{ top:0; left:50%; } #hp-bl{ top:50%; left:0; } #hp-br{ top:50%; left:50%; }
+  @media (max-width:640px){ .hike-preview{ width:78px; height:78px; right:12px; bottom:12px; } .hike-preview .hp-label{ display:none; } }
+  .hike-preview.expand{
+    right:0; bottom:0; left:0; top:0; width:100vw; height:100vh;
+    border-radius:0; border:none; transform:scale(1);
+    transition:right 1s cubic-bezier(.4,0,.2,1), bottom 1s cubic-bezier(.4,0,.2,1), left 1s cubic-bezier(.4,0,.2,1), top 1s cubic-bezier(.4,0,.2,1), width 1s cubic-bezier(.4,0,.2,1), height 1s cubic-bezier(.4,0,.2,1), border-radius 1s ease;
+    z-index:900;
+  }
+  .hike-preview.expand .hp-quadrant, .hike-preview.expand .hp-label{ display:none; }
 
   /* ---------- footer ledger bar ---------- */
   .ledger-bar{ margin-top:20px; border-top:1px solid var(--border); background:#070B09; display:flex; align-items:center; justify-content:space-between; padding:20px 28px; flex-wrap:wrap; gap:10px; }
@@ -594,10 +614,13 @@
     </div>
 
     <div id="quiz-view">
-      <div class="reveal-piece" id="piece-tl"></div>
-      <div class="reveal-piece" id="piece-tr"></div>
-      <div class="reveal-piece" id="piece-bl"></div>
-      <div class="reveal-piece" id="piece-br"></div>
+            <div class="hike-preview" id="hikePreview" aria-hidden="true">
+        <div class="hp-quadrant" id="hp-tl"></div>
+        <div class="hp-quadrant" id="hp-tr"></div>
+        <div class="hp-quadrant" id="hp-bl"></div>
+        <div class="hp-quadrant" id="hp-br"></div>
+        <span class="hp-label">Trail view<br>Vista del sendero</span>
+      </div>
       <div class="progress-path" id="progressPath"></div>
       <div class="quiz-card">
         <p class="quiz-q" id="quizQ"></p>
@@ -893,26 +916,35 @@
   var quizView = document.getElementById('quiz-view');
   var completeView = document.getElementById('complete-view');
   var progressPath = document.getElementById('progressPath');
-  var pieceIds = ['piece-tl','piece-tr','piece-bl','piece-br'];
+    var pieceIds = ['hp-tl','hp-tr','hp-bl','hp-br'];
+  var hikePreview = document.getElementById('hikePreview');
 
   function setupRevealPhoto(){
     var photo = trailData[currentTrail].photo;
+    hikePreview.classList.remove('expand');
     pieceIds.forEach(function(id){
       var el = document.getElementById(id);
-      el.classList.remove('shown');
-      el.style.backgroundImage = photo ? "url('"+photo+"')" : 'none';
+      if(el) el.classList.remove('revealed');
     });
+    if(photo){
+      hikePreview.style.backgroundImage = "url('"+photo+"')";
+      hikePreview.classList.add('show');
+    } else {
+      hikePreview.style.backgroundImage = 'none';
+      hikePreview.classList.remove('show');
+    }
   }
   function revealPiece(index){
     var id = pieceIds[index];
     if(!id) return;
     var el = document.getElementById(id);
-    if(el) el.classList.add('shown');
+    if(el) el.classList.add('revealed');
   }
   function hideAllPieces(){
+    hikePreview.classList.remove('show', 'expand');
     pieceIds.forEach(function(id){
       var el = document.getElementById(id);
-      if(el) el.classList.remove('shown');
+      if(el) el.classList.remove('revealed');
     });
   }
 
@@ -952,14 +984,24 @@
   function answer(ok, btn){
     document.querySelectorAll('.quiz-opt').forEach(function(b){ b.disabled = true; });
     btn.classList.add(ok ? 'correct' : 'wrong');
-    if(ok){
+        if(ok){
       document.getElementById('quizFeedback').innerHTML = '<strong>Correct!</strong> Onward on the trail. / <strong>¡Correcto!</strong> Sigue el sendero.';
       revealPiece(qi);
-      setTimeout(function(){
-        qi++;
-        if(qi >= currentQuestions().length){ finishTrail(); }
-        else { renderQuestion(); }
-      }, 850);
+      var isLastQuestion = (qi + 1) >= currentQuestions().length;
+      if(isLastQuestion){
+        setTimeout(function(){
+          hikePreview.classList.add('expand');
+          setTimeout(function(){
+            qi++;
+            finishTrail();
+          }, 1500);
+        }, 850);
+      } else {
+        setTimeout(function(){
+          qi++;
+          renderQuestion();
+        }, 850);
+      }
     } else {
       document.getElementById('quizFeedback').innerHTML = 'Not quite — try another answer. / No exactamente — intenta otra.';
       setTimeout(function(){
@@ -988,7 +1030,8 @@
     });
   }
 
-  function finishTrail(){
+    function finishTrail(){
+    hikePreview.classList.remove('expand', 'show');
     quizView.classList.remove('active');
     completeView.classList.add('active');
     var trail = trailData[currentTrail];
