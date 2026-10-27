@@ -1634,11 +1634,25 @@
   var badgeCount = 0;
 
   /* ---------- Read-aloud (English) ---------- */
-  var enVoice = null;
+  var enVoice = null, enVoiceIsFemale = false;
+  var FEM_VOICE_RE = /female|samantha|victoria|karen|moira|tessa|fiona|veena|zira|jenny|aria|susan|hazel|libby|sonia|serena|allison|joanna|kendra|kimberly|salli|ivy|emma|amy|nicole|olivia|nora|ruth|stephanie|michelle|clara|natasha|catherine|heather|linda|google us english/i;
+  var MALE_VOICE_RE = /(^|[^a-z])male\b|\b(daniel|alex|fred|tom|david|mark|guy|ryan|george|james|rishi|aaron|arthur|oliver|thomas|gordon|evan|eddy|reed|rocko|ethan|liam|brian|andrew|christopher|eric|roger|steffan|davis|jason|tony|matthew|joey|justin|kevin)\b/i;
+  function voiceRank(v){
+    var n = v.name || '', sc = 0;
+    if(/natural|neural|enhanced|premium|online/i.test(n)) sc += 3;
+    if(/google/i.test(n)) sc += 1;
+    if(/^en[-_]US/i.test(v.lang || '')) sc += 2;
+    return sc;
+  }
   function pickEnVoice(){
     if(!('speechSynthesis' in window)) return;
-    var voices = window.speechSynthesis.getVoices();
-    enVoice = voices.find(function(v){ return /^en(-|_|$)/i.test(v.lang); }) || null;
+    var en = window.speechSynthesis.getVoices().filter(function(v){ return /^en(-|_|$)/i.test(v.lang); });
+    function best(list){ return list.slice().sort(function(a, b){ return voiceRank(b) - voiceRank(a); })[0] || null; }
+    /* Prefer a female English voice; never pick a voice that is known to be male. */
+    var fem = best(en.filter(function(v){ return !/(^|[^a-z])male\b/i.test(v.name) && FEM_VOICE_RE.test(v.name); }));
+    var neutral = best(en.filter(function(v){ return !MALE_VOICE_RE.test(v.name); }));
+    enVoice = fem || neutral || best(en) || null;
+    enVoiceIsFemale = !!fem;
   }
   if('speechSynthesis' in window){
     pickEnVoice();
@@ -1651,6 +1665,7 @@
     var u = new SpeechSynthesisUtterance(text);
     u.lang = 'en-US';
     u.rate = 0.92;
+    u.pitch = enVoiceIsFemale ? 1 : 1.12; /* slightly higher if no clearly female voice was found */
     if(enVoice) u.voice = enVoice;
     if(btn){
       btn.classList.add('speaking');
