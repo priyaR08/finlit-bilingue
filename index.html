@@ -1658,28 +1658,90 @@
     pickEnVoice();
     window.speechSynthesis.onvoiceschanged = pickEnVoice;
   }
-  function speakText(text, btn){
-    if(!('speechSynthesis' in window) || !text) return;
-    window.speechSynthesis.cancel();
-    document.querySelectorAll('.speak-btn.speaking').forEach(function(b){ b.classList.remove('speaking'); });
-    var u = new SpeechSynthesisUtterance(text);
-    u.lang = 'en-US';
-    u.rate = 0.92;
-    u.pitch = enVoiceIsFemale ? 1 : 1.12; /* slightly higher if no clearly female voice was found */
-    if(enVoice) u.voice = enVoice;
-    if(btn){
-      btn.classList.add('speaking');
-      u.onend = function(){ btn.classList.remove('speaking'); };
-      u.onerror = function(){ btn.classList.remove('speaking'); };
-    }
-    window.speechSynthesis.speak(u);
+  /* ---- Pre-recorded clips (Kokoro, default American voice) with device-voice fallback ----
+     Each spoken sentence is a small mp3 named by a hash of its text: audio/<hash>.mp3.
+     audio/index.json lists the clips that exist. If a clip is missing, the device voice is used. */
+  var HAS_AUDIO = (typeof Audio !== 'undefined'), AUDIO_DIR = 'audio/', audioSet = null, curAudio = null, speakTok = 0;
+  function hashKey(t){
+    var bytes = new TextEncoder().encode(t), h = 0x811c9dc5;
+    for(var i = 0; i < bytes.length; i++){ h ^= bytes[i]; h = Math.imul(h, 0x01000193) >>> 0; }
+    return ('00000000' + h.toString(16)).slice(-8);
   }
+  if(HAS_AUDIO && window.fetch){
+    if(location.protocol === 'file:'){ audioSet = 'try'; }
+    else {
+      fetch(AUDIO_DIR + 'index.json').then(function(r){ return r.ok ? r.json() : []; }).then(function(list){
+        if(Array.isArray(list) && list.length){ audioSet = {}; list.forEach(function(k){ audioSet[k] = 1; }); }
+      }).catch(function(){});
+    }
+  }
+  function hasClip(key){ return audioSet === 'try' || (audioSet && audioSet[key]); }
+  function cleanForSpeech(t){
+    return String(t)
+      .replace(/&/g, ' and ')
+      .replace(/\bLLCs\b/g, 'L L Cs').replace(/\bLLC\b/g, 'L L C')
+      .replace(/\bIP\b/g, 'I P').replace(/\bIRS\b/g, 'I R S').replace(/83\(b\)/g, 'eighty-three B').replace(/\b50\/50\b/g, 'fifty fifty')
+      .replace(/\bSCORE\b/g, 'Score')
+      .replace(/(\d+)\s*\/\s*(\d+)/g, '$1 of $2')
+      .replace(/\s\/\s/g, ' or ')
+      .replace(/\s+/g, ' ').trim();
+  }
+  function chunkText(t){
+    var parts = cleanForSpeech(t).split(/(?<=[.!?])\s+/), out = [], cur = '';
+    parts.forEach(function(x){
+      if((cur + ' ' + x).length > 170 && cur){ out.push(cur); cur = x; } else { cur = cur ? cur + ' ' + x : x; }
+    });
+    if(cur) out.push(cur);
+    return out;
+  }
+  function stopAllSpeech(){
+    speakTok++;
+    if(curAudio){ try{ curAudio.pause(); }catch(e){} curAudio = null; }
+    if('speechSynthesis' in window){ try{ window.speechSynthesis.cancel(); }catch(e){} }
+  }
+  function speakText(text, btn){
+    if((!('speechSynthesis' in window) && !HAS_AUDIO) || !text) return;
+    stopAllSpeech();
+    document.querySelectorAll('.speak-btn.speaking').forEach(function(b){ b.classList.remove('speaking'); });
+    var tok = speakTok, queue = chunkText(text), i = 0;
+    if(btn) btn.classList.add('speaking');
+    function finish(){ if(btn && tok === speakTok) btn.classList.remove('speaking'); }
+    function device(chunk, adv){
+      if(!('speechSynthesis' in window)){ adv(); return; }
+      var timer = null, u = new SpeechSynthesisUtterance(chunk);
+      u.lang = 'en-US'; u.rate = 0.92;
+      u.pitch = enVoiceIsFemale ? 1 : 1.12;
+      if(enVoice) u.voice = enVoice;
+      u.onend = function(){ clearTimeout(timer); adv(); }; u.onerror = function(){ clearTimeout(timer); adv(); };
+      timer = setTimeout(adv, Math.max(2500, chunk.length * 120));
+      window.speechSynthesis.speak(u);
+    }
+    (function next(){
+      if(tok !== speakTok) return;
+      if(i >= queue.length){ finish(); return; }
+      var chunk = queue[i++], advanced = false;
+      function adv(){ if(advanced) return; advanced = true; next(); }
+      var key = hashKey(chunk);
+      if(HAS_AUDIO && hasClip(key)){
+        var a = new Audio(AUDIO_DIR + key + '.mp3'), fellBack = false;
+        curAudio = a;
+        var fallback = function(){ if(fellBack || tok !== speakTok) return; fellBack = true; device(chunk, adv); };
+        a.onended = function(){ if(!fellBack) adv(); };
+        a.onerror = fallback;
+        var pr = a.play();
+        if(pr && pr.catch) pr.catch(function(err){ if(err && err.name === 'NotAllowedError'){ finish(); return; } fallback(); });
+      } else {
+        device(chunk, adv);
+      }
+    })();
+  }
+  window.__finlitSpeech = { chunks: function(t){ return chunkText(t).map(function(c){ return {key: hashKey(c), text: c}; }); } };
   document.addEventListener('click', function(e){
     var btn = e.target.closest('.speak-btn');
     if(!btn) return;
     speakText(btn.getAttribute('data-text') || '', btn);
   });
-  if(!('speechSynthesis' in window)){
+  if(!('speechSynthesis' in window) && !HAS_AUDIO){
     document.querySelectorAll('.speak-btn').forEach(function(b){ b.style.display = 'none'; });
   }
 
@@ -1837,6 +1899,24 @@
       var aprPair = aprBtn + (appState.secondLang === 'hi' ? '' : ('/'+taeBtn));
       return '<strong style="color:var(--ink)">Credit card <span class="i18n"><span class="es">/ Tarjeta de crédito:</span><span class="hi">/ क्रेडिट कार्ड:</span></span></strong> a card that lets you borrow money instantly for a purchase, which you repay later — with interest ('+aprPair+') if you don\'t pay the full balance. '+speakBtn('Credit card: a card that lets you borrow money instantly for a purchase, which you repay later, with interest, if you do not pay the full balance.')+'<br><span class="i18n"><span class="es" style="color:var(--ink-faint)">Una tarjeta que te permite pedir dinero prestado al instante para una compra, que devuelves después — con intereses si no pagas el saldo completo.</span><span class="hi" style="color:var(--ink-faint)">एक कार्ड जो आपको खरीदारी के लिए तुरंत पैसे उधार लेने देता है, जिसे आप बाद में चुकाते हैं — यदि आप पूरा बकाया नहीं चुकाते तो ब्याज सहित।</span></span>';
     } }
+  };
+  /* Lists every English sentence the read-aloud buttons can speak (used by tools/make_audio_kokoro.py's manifest builder). */
+  window.__finlitSpeech.all = function(){
+    var out = [];
+    function eng(str){ return String(str || '').split(' / ')[0]; }
+    Object.keys(trailData).forEach(function(k){ (trailData[k].questions || []).forEach(function(q){ out.push(eng(q.q)); if(q.qHi) out.push(eng(q.qHi)); }); });
+    MC_QUESTIONS.forEach(function(q){ out.push(q.question_en); });
+    var holder = document.createElement('div'), prev = appState.secondLang;
+    ['es','hi'].forEach(function(lg){
+      appState.secondLang = lg;
+      Object.keys(loans).forEach(function(k){
+        var d = loans[k]; holder.innerHTML = (typeof d.text === 'function') ? d.text() : d.text;
+        Array.prototype.forEach.call(holder.querySelectorAll('[data-text]'), function(e){ out.push(e.getAttribute('data-text')); });
+      });
+    });
+    appState.secondLang = prev;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-text]'), function(e){ out.push(e.getAttribute('data-text')); });
+    return out.filter(Boolean);
   };
   function renderLoanText(){
     var activeBtn = document.querySelector('#tc-credit .loan-btn.active');
