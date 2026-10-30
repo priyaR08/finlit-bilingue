@@ -56,7 +56,7 @@
   #view-home h1 .es{ font-size:.55em; font-weight:600; color:var(--ink-soft); margin-top:8px; }
   .mode-grid{ max-width:1280px; margin:40px auto 72px; padding:0 24px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:20px; }
   @media (max-width:600px){ .mode-grid{ grid-template-columns:1fr; } }
-  .mode-card{ background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:30px 24px; text-align:left; transition:transform .15s ease, border-color .15s ease; }
+  .mode-card{ color:var(--ink); background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:30px 24px; text-align:left; transition:transform .15s ease, border-color .15s ease; }
   .mode-card:hover{ transform:translateY(-3px); border-color:var(--border-strong); }
   .mode-icon{ width:52px; height:52px; border-radius:13px; background:var(--mint-dim); color:var(--mint); display:flex; align-items:center; justify-content:center; margin-bottom:18px; }
   .mode-icon svg{ width:26px; height:26px; }
@@ -1739,8 +1739,10 @@
   document.addEventListener('click', function(e){
     var btn = e.target.closest('.speak-btn');
     if(!btn) return;
+    /* A speaker placed inside a tile (which is itself a button) must not also open the tile. */
+    if(btn.tagName === 'SPAN'){ e.stopPropagation(); e.preventDefault(); }
     speakText(btn.getAttribute('data-text') || '', btn);
-  });
+  }, true);
   if(!('speechSynthesis' in window) && !HAS_AUDIO){
     document.querySelectorAll('.speak-btn').forEach(function(b){ b.style.display = 'none'; });
   }
@@ -4296,5 +4298,37 @@
   SECOND_LANG_LISTENERS.push(function(){
     Object.keys(matchRounds).forEach(function(key){ buildMatchGame(key, matchRounds[key]); });
   });
+
+  /* ---------- Read-aloud for headings and tile titles (English only) ---------- */
+  function addHeadingSpeakers(){
+    document.querySelectorAll('h1,h2,h3,h4').forEach(function(h){
+      if(h.hasAttribute('data-spoken')) return;
+      h.setAttribute('data-spoken', '1');
+      if(h.querySelector('.speak-btn') || h.closest('.unlock-box')) return;
+      var c = h.cloneNode(true);
+      Array.prototype.forEach.call(c.querySelectorAll('.i18n,.es,.hi,svg,.speak-btn'), function(x){ x.remove(); });
+      var txt = c.textContent.replace(/\s+/g, ' ').trim();
+      if(!txt) return;
+      var holder = document.createElement('div');
+      holder.innerHTML = speakBtn(txt);
+      var el = holder.firstChild;
+      if(h.closest('button')){
+        /* inside a clickable tile: use a span so we never nest a button inside a button */
+        var sp = document.createElement('span');
+        sp.className = el.className; sp.setAttribute('data-text', txt); sp.setAttribute('aria-hidden', 'true'); sp.innerHTML = el.innerHTML;
+        el = sp;
+      }
+      var second = h.querySelector('.i18n,.es');
+      if(second && second.parentNode === h) h.insertBefore(el, second); else h.appendChild(el);
+    });
+  }
+  addHeadingSpeakers();
+  if(window.MutationObserver){
+    var spkTimer = null;
+    new MutationObserver(function(){
+      if(spkTimer) return;
+      spkTimer = setTimeout(function(){ spkTimer = null; addHeadingSpeakers(); }, 200);
+    }).observe(document.body, {childList:true, subtree:true});
+  }
 })();
 </script>
